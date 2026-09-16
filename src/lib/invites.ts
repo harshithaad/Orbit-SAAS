@@ -3,6 +3,8 @@ import type { Role } from "@/generated/prisma/enums";
 import { db, tenantDb, type TenantDb } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { UsageLimitError, consume } from "@/lib/usage";
+import { sendEmail } from "@/lib/email";
+import { inviteEmail } from "@/lib/email-templates";
 
 /**
  * Signed, expiring invitation links.
@@ -94,7 +96,7 @@ export async function createInvitation(
   const exp = Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000;
   const org = orgDb.$orgId();
 
-  return orgDb.$transaction(async (tx) => {
+  const created = await orgDb.$transaction(async (tx) => {
     await tx.invitation.updateMany({
       where: { organisationId: org, email, status: "PENDING" },
       data: { status: "REVOKED" },
@@ -131,6 +133,24 @@ export async function createInvitation(
     });
     return { invitation, token, url: inviteUrl(token) };
   });
+
+  // Email after commit so a mail failure can never roll back the invite.
+  const [inviter, organisation] = await Promise.all([
+    db.user.findUnique({ where: { id: opts.invitedById }, select: { name: true, email: true } }),
+    db.organisation.findUnique({ where: { id: org }, select: { name: true } }),
+  ]);
+  await sendEmail(
+    inviteEmail({
+      to: email,
+      orgName: organisation?.name ?? "your team",
+      inviterName: inviter?.name ?? inviter?.email ?? "A teammate",
+      role: opts.role,
+      url: created.url,
+      expiresAt: created.invitation.expiresAt,
+      invitationId: created.invitation.id,
+    }),
+  );
+  return created;
 }
 
 export async function revokeInvitation(orgDb: TenantDb, id: string, actorId: string) {
