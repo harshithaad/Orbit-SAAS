@@ -14,7 +14,7 @@ Razorpay · Resend · Vercel
 - [x] Phase 3 — Signed invite links + RBAC (single `can()` check)
 - [x] Phase 4 — Plans (Free/Pro/Team), 7 feature flags, 3 metered limits, gated UI + 403s
 - [x] Phase 5 — Razorpay subscriptions, signature-verified idempotent webhooks, replay harness
-- [ ] Phase 6 — Usage metering
+- [x] Phase 6 — Usage metering (soft/hard limits, monthly + lifetime metrics, usage dashboard, 429s)
 - [ ] Phase 7 — Audit log + transactional email
 - [ ] Phase 8 — Integration tests, deploy
 
@@ -102,6 +102,18 @@ npm run replay -- --org <organisationId> --events 150 --retries 3
 Generates 150 distinct signed events, delivers each 3× in shuffled order with
 concurrency 10, then checks the DB. Last run: **450 deliveries → 300 duplicates
 rejected, 150 event rows, exactly 1 plan change, 0 double-provisioning.**
+
+## Usage metering
+
+`src/lib/usage.ts`. One `UsageRecord` per (org, metric, period). `consume()`
+runs inside the transaction that performs the metered action: it locks the
+counter row (`FOR UPDATE`), compares against the plan's hard limit, and either
+increments or throws `UsageLimitError` — so the action rolls back with it and
+concurrent requests can't both slip under the cap. Soft limits only produce
+warnings. Monthly metrics (`api_calls`) reset on the 1st (UTC); row-backed
+metrics (`members`, `projects`) reconcile from the live count so deletions
+free quota. `POST /api/v1/ping` is a metered example endpoint that returns
+`429` with `x-ratelimit-*` headers at the cap.
 
 ## Tenant isolation (how Org A can never read Org B)
 

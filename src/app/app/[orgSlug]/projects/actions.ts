@@ -6,10 +6,14 @@ import { requireOrgOrThrow } from "@/lib/org";
 import { ForbiddenError } from "@/lib/errors";
 import { assertCan } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
+import { UsageLimitError, consume } from "@/lib/usage";
 
-export type ActionState = { error?: string; ok?: boolean };
+export type ActionState = { error?: string; ok?: boolean; warning?: string; limitReached?: boolean };
 
 function fail(e: unknown): ActionState {
+  if (e instanceof UsageLimitError) {
+    return { error: `You've reached the ${e.limit} ${e.metric} limit on the ${e.tier} plan.`, limitReached: true };
+  }
   if (e instanceof ForbiddenError) return { error: e.message };
   console.error(e);
   return { error: "Something went wrong." };
@@ -28,10 +32,20 @@ export async function createProjectAction(
       .safeParse({ name: fd.get("name"), description: fd.get("description") || undefined });
     if (!parsed.success) return { error: "Name is required (max 80 chars)." };
 
-    // Usage metering (plan limits) is applied here in Phase 6.
-    await ctx.db.project.create({ data: { organisationId: ctx.org.id, ...parsed.data } });
+    // Reserve quota and create in one transaction: if the limit is hit, nothing is written.
+    const usage = await ctx.db.$transaction(async (tx) => {
+      const u = await consume(tx, "projects");
+      await tx.project.create({ data: { organisationId: tx.$orgId(), ...parsed.data } });
+      return u;
+    });
     revalidatePath(`/app/${orgSlug}/projects`);
-    return { ok: true };
+    return {
+      ok: true,
+      warning:
+        usage.level === "warning" && usage.hard !== null
+          ? `${usage.used} of ${usage.hard} projects used on your plan.`
+          : undefined,
+    };
   } catch (e) {
     return fail(e);
   }

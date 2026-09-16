@@ -13,6 +13,7 @@ const REASONS: Record<InviteFailure, string> = {
   not_found: "This invitation no longer exists.",
   not_pending: "This invitation has already been used or was revoked.",
   email_mismatch: "This invitation was sent to a different email address.",
+  member_limit: "This organisation has reached the member limit of its plan. Ask an owner to upgrade.",
 };
 
 export default async function InvitePage({ params, searchParams }: PageProps<"/invite/[token]">) {
