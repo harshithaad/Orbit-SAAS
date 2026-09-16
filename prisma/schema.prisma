@@ -154,34 +154,40 @@ enum SubscriptionStatus {
   UNPAID
 }
 
-// @tenant — one per organisation. Free orgs still get a row (tier FREE, no Stripe ids).
+// @tenant — one per organisation. Free orgs still get a row (tier FREE, no gateway ids).
 model Subscription {
-  id                   String             @id @default(cuid())
-  organisationId       String             @unique
-  tier                 PlanTier           @default(FREE)
-  status               SubscriptionStatus @default(ACTIVE)
-  stripeCustomerId     String?            @unique
-  stripeSubscriptionId String?            @unique
-  stripePriceId        String?
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                    String             @id @default(cuid())
+  organisationId        String             @unique
+  tier                  PlanTier           @default(FREE)
+  status                SubscriptionStatus @default(ACTIVE)
+  // A scheduled downgrade: takes effect at currentPeriodEnd (mid-cycle downgrades
+  // keep the paid tier until the period the customer already paid for ends).
+  pendingTier           PlanTier?
+  gatewayCustomerId     String?
+  gatewaySubscriptionId String?            @unique
+  gatewayPlanId         String?
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean            @default(false)
+  // created_at of the newest gateway event applied. Older events (late
+  // retries, out-of-order delivery) are ignored so state never moves backwards.
+  gatewayEventAt        DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
 }
 
-// Every Stripe event we have ever seen. `stripeEventId` is unique, so a retried
-// delivery hits the constraint and is treated as already-processed.
+// Every gateway webhook event we have ever received. `eventId` is unique, so a
+// retried delivery hits the constraint and is treated as already-processed.
 model WebhookEvent {
-  id            String    @id @default(cuid())
-  stripeEventId String    @unique
-  type          String
-  payload       Json
-  receivedAt    DateTime  @default(now())
-  processedAt   DateTime?
-  error         String?
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  type        String
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  error       String?
 
   @@index([type])
 }

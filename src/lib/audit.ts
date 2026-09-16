@@ -10,6 +10,8 @@ export type AuditAction =
   | "member.joined"
   | "member.role_changed"
   | "member.removed"
+  | "plan.checkout_started"
+  | "plan.change_scheduled"
   | "plan.changed"
   | "plan.canceled"
   | "payment.failed"

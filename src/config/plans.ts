@@ -36,10 +36,11 @@ export type PlanDefinition = {
   tier: PlanTier;
   name: string;
   description: string;
-  /** Display price in USD per month; 0 for Free. */
-  priceMonthlyUsd: number;
-  /** Env var holding the Stripe Price id (test mode). Free has none. */
-  stripePriceEnv: "STRIPE_PRICE_PRO" | "STRIPE_PRICE_TEAM" | null;
+  /** Display price per month in `currency` major units; 0 for Free. */
+  priceMonthly: number;
+  currency: "INR";
+  /** Env var holding the Razorpay Plan id (test mode). Free has none. */
+  razorpayPlanEnv: "RAZORPAY_PLAN_PRO" | "RAZORPAY_PLAN_TEAM" | null;
   limits: Record<Metric, MetricLimit>;
   features: Record<Feature, boolean>;
 };
@@ -49,8 +50,9 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
     tier: "FREE",
     name: "Free",
     description: "For trying things out.",
-    priceMonthlyUsd: 0,
-    stripePriceEnv: null,
+    priceMonthly: 0,
+    currency: "INR",
+    razorpayPlanEnv: null,
     limits: {
       members: { hard: 3, soft: 2, period: "lifetime" },
       projects: { hard: 3, soft: 2, period: "lifetime" },
@@ -70,8 +72,9 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
     tier: "PRO",
     name: "Pro",
     description: "For small teams shipping real work.",
-    priceMonthlyUsd: 9,
-    stripePriceEnv: "STRIPE_PRICE_PRO",
+    priceMonthly: 749,
+    currency: "INR",
+    razorpayPlanEnv: "RAZORPAY_PLAN_PRO",
     limits: {
       members: { hard: 10, soft: 8, period: "lifetime" },
       projects: { hard: 25, soft: 20, period: "lifetime" },
@@ -91,8 +94,9 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
     tier: "TEAM",
     name: "Team",
     description: "For growing organisations.",
-    priceMonthlyUsd: 29,
-    stripePriceEnv: "STRIPE_PRICE_TEAM",
+    priceMonthly: 2499,
+    currency: "INR",
+    razorpayPlanEnv: "RAZORPAY_PLAN_TEAM",
     limits: {
       members: { hard: null, soft: null, period: "lifetime" },
       projects: { hard: null, soft: null, period: "lifetime" },

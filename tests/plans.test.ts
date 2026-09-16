@@ -38,10 +38,10 @@ describe("plan config", () => {
     }
   });
 
-  it("paid tiers map to a Stripe price env var; Free does not", () => {
-    expect(PLANS.FREE.stripePriceEnv).toBeNull();
-    expect(PLANS.PRO.stripePriceEnv).toBe("STRIPE_PRICE_PRO");
-    expect(PLANS.TEAM.stripePriceEnv).toBe("STRIPE_PRICE_TEAM");
+  it("paid tiers map to a Razorpay plan env var; Free does not", () => {
+    expect(PLANS.FREE.razorpayPlanEnv).toBeNull();
+    expect(PLANS.PRO.razorpayPlanEnv).toBe("RAZORPAY_PLAN_PRO");
+    expect(PLANS.TEAM.razorpayPlanEnv).toBe("RAZORPAY_PLAN_TEAM");
   });
 });
 
