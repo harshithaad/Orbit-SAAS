@@ -2,6 +2,7 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypt
 import type { Role } from "@/generated/prisma/enums";
 import { db, tenantDb, type TenantDb } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { UsageLimitError, consume } from "@/lib/usage";
 
 /**
  * Signed, expiring invitation links.
@@ -156,7 +157,8 @@ export type InviteFailure =
   | "expired"
   | "not_found"
   | "not_pending"
-  | "email_mismatch";
+  | "email_mismatch"
+  | "member_limit";
 
 /**
  * Resolves a token to its invitation without side effects (for the accept
@@ -201,6 +203,9 @@ export async function acceptInvitation(
       });
       if (flipped.count !== 1) throw new Error("not_pending");
 
+      // Plan seat limit — counted against live memberships.
+      await consume(tx, "members");
+
       await tx.membership.upsert({
         where: { organisationId_userId: { organisationId: inv.organisationId, userId: user.id } },
         update: {},
@@ -216,6 +221,7 @@ export async function acceptInvitation(
     });
   } catch (e) {
     if (e instanceof Error && e.message === "not_pending") return { ok: false, reason: "not_pending" };
+    if (e instanceof UsageLimitError) return { ok: false, reason: "member_limit" };
     throw e;
   }
 

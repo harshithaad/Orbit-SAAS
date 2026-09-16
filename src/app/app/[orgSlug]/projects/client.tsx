@@ -28,6 +28,12 @@ export function NewProjectForm({ orgSlug }: { orgSlug: string }) {
         {pending ? "Creating…" : "Create project"}
       </Button>
       <ErrorText>{state.error}</ErrorText>
+      {state.limitReached && (
+        <a href="../billing" className="block text-sm text-zinc-700 underline">
+          Upgrade your plan
+        </a>
+      )}
+      {state.warning && <p className="text-sm text-amber-700">{state.warning}</p>}
     </form>
   );
 }
