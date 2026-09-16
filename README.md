@@ -15,7 +15,7 @@ Razorpay · Resend · Vercel
 - [x] Phase 4 — Plans (Free/Pro/Team), 7 feature flags, 3 metered limits, gated UI + 403s
 - [x] Phase 5 — Razorpay subscriptions, signature-verified idempotent webhooks, replay harness
 - [x] Phase 6 — Usage metering (soft/hard limits, monthly + lifetime metrics, usage dashboard, 429s)
-- [ ] Phase 7 — Audit log + transactional email
+- [x] Phase 7 — Audit log + transactional email (invite, receipt, payment failed)
 - [ ] Phase 8 — Integration tests, deploy
 
 ## Local setup
@@ -114,6 +114,20 @@ warnings. Monthly metrics (`api_calls`) reset on the 1st (UTC); row-backed
 metrics (`members`, `projects`) reconcile from the live count so deletions
 free quota. `POST /api/v1/ping` is a metered example endpoint that returns
 `429` with `x-ratelimit-*` headers at the cap.
+
+## Audit log & email
+
+Every sensitive action writes an `AuditLog` row inside the same transaction
+as the action (`src/lib/audit.ts`): org created, invite sent/revoked, member
+joined/removed, role changed, checkout started, plan change scheduled/applied,
+cancellation, payment failure, project deleted. Viewing it is a Pro feature.
+
+`src/lib/email.ts` sends via Resend when `RESEND_API_KEY` is set and logs to
+the console otherwise; tests swap in a capturing transport. Emails are sent
+*after* the owning transaction commits, never inside it, and each carries a
+provider idempotency key (`invite/<id>`, `receipt/<paymentId>`,
+`payment-failed/<eventId>`). Templates: invitation, receipt (on
+`subscription.charged`), payment failed / subscription halted (to owners).
 
 ## Tenant isolation (how Org A can never read Org B)
 

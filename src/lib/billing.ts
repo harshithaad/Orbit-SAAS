@@ -6,6 +6,7 @@ import { ForbiddenError } from "@/lib/errors";
 import { isUpgrade } from "@/lib/plans";
 import { planIdFor, razorpay, tierForPlanId, verifyWebhookSignature } from "@/lib/razorpay";
 import { PLANS } from "@/config/plans";
+import { notifyPaymentFailed, notifyReceipt } from "@/lib/notify";
 
 /**
  * Billing state machine.
@@ -230,12 +231,42 @@ export async function processWebhook(input: {
       await tx.webhookEvent.update({ where: { eventId: input.eventId! }, data: { processedAt: new Date() } });
       return applied;
     });
+
+    // Notifications go out only after the transaction committed, and only for
+    // the first delivery (duplicates never reach this point).
+    if (result.applied) await notifyForEvent(event, organisationId, input.eventId, result);
     return { ok: true, duplicate: false, applied: result.applied, reason: result.reason };
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return { ok: true, duplicate: true, applied: false, reason: "duplicate event" };
     }
     throw e;
+  }
+}
+
+const FAILURE_EVENTS = new Set(["payment.failed", "subscription.pending", "subscription.halted"]);
+
+async function notifyForEvent(event: RzpWebhookEvent, organisationId: string, eventId: string, result: ApplyResult) {
+  const payment = event.payload.payment?.entity;
+  const sub = event.payload.subscription?.entity;
+  if (event.event === "subscription.charged" && payment && result.tier && result.tier !== "FREE") {
+    await notifyReceipt({
+      organisationId,
+      tier: result.tier,
+      amountPaise: payment.amount,
+      paymentId: payment.id,
+      periodEnd: sub?.current_end ? new Date(sub.current_end * 1000) : null,
+    });
+  } else if (FAILURE_EVENTS.has(event.event)) {
+    const planTier = tierForPlanId(sub?.plan_id) ?? result.tier ?? "FREE";
+    await notifyPaymentFailed({
+      organisationId,
+      tier: planTier,
+      amountPaise: payment?.amount ?? null,
+      reason: payment?.error_description ?? null,
+      halted: event.event === "subscription.halted",
+      eventId,
+    });
   }
 }
 
