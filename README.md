@@ -16,7 +16,7 @@ Razorpay · Resend · Vercel
 - [x] Phase 5 — Razorpay subscriptions, signature-verified idempotent webhooks, replay harness
 - [x] Phase 6 — Usage metering (soft/hard limits, monthly + lifetime metrics, usage dashboard, 429s)
 - [x] Phase 7 — Audit log + transactional email (invite, receipt, payment failed)
-- [ ] Phase 8 — Integration tests, deploy
+- [x] Phase 8 — 83 integration tests, replay harness, Vercel deploy config
 
 ## Local setup
 
@@ -99,9 +99,18 @@ signature checks.
 npm run replay -- --org <organisationId> --events 150 --retries 3
 ```
 
-Generates 150 distinct signed events, delivers each 3× in shuffled order with
-concurrency 10, then checks the DB. Last run: **450 deliveries → 300 duplicates
-rejected, 150 event rows, exactly 1 plan change, 0 double-provisioning.**
+Generates N distinct signed events, delivers each 3× in shuffled order with
+concurrency 10, then checks the DB.
+
+Last run (500 × 3): **1,500 deliveries → 1,000 duplicates rejected, 500 event
+rows, exactly 1 plan change, 0 double-provisioning.** The shuffled order also
+exercises the out-of-order rule: 491 late-arriving older events were recorded
+but not applied.
+
+An earlier run at 150 × 3 caught a real race — two *different* events for the
+same org processed concurrently both read `tier = FREE` and both wrote a
+`plan.changed` entry. Fixed with `SELECT … FOR UPDATE` on the org's
+subscription row inside the transaction.
 
 ## Usage metering
 
@@ -128,6 +137,64 @@ the console otherwise; tests swap in a capturing transport. Emails are sent
 provider idempotency key (`invite/<id>`, `receipt/<paymentId>`,
 `payment-failed/<eventId>`). Templates: invitation, receipt (on
 `subscription.charged`), payment failed / subscription halted (to owners).
+
+## The three questions
+
+**1. A payment webhook is delivered three times. What happens?**
+Each delivery hits `POST /api/webhooks/razorpay`, which reads the raw body and
+verifies `X-Razorpay-Signature` (HMAC-SHA256, timing-safe). All three pass.
+`processWebhook` then opens one transaction on the org-scoped client and
+inserts `WebhookEvent(eventId = x-razorpay-event-id)` — a unique column. The
+first delivery inserts, applies the state (`applyGatewayState`, under a row
+lock on `Subscription`), writes one `AuditLog` row, marks the event processed,
+commits, and *then* sends the receipt email. Deliveries two and three fail the
+unique insert with P2002 before any state code runs, roll back, and are
+answered `200 {duplicate: true}` so Razorpay stops retrying. One row changes,
+one audit entry, one email (which also carries `receipt/<paymentId>` as a
+provider idempotency key). The customer is charged once because Razorpay
+charges once — our job is to *provision* once, and that's what the unique key
+guarantees. Proven by `tests/webhooks.test.ts` and the replay harness above.
+
+**2. How can Org A never read Org B's rows? Show the code path.**
+`requireOrg(slug)` (`src/lib/org.ts`) → session user → `Membership` lookup
+for (user, org) → `tenantDb(org.id)`. That membership lookup is the only place
+an `organisationId` is ever derived; request input never supplies one.
+`tenantDb` is a Prisma extension (`src/lib/tenant.ts`, `tenantScope`) that
+rewrites every query on the six tenant models to include
+`organisationId = <bound org>`, overriding anything the caller passed, and
+then re-checks itself with `assertScoped`. The root client has a second
+extension (`tenantGuard`) that throws `TenantScopeError` on any tenant-model
+query without an org scope, so even code that bypasses `tenantDb` cannot run
+an unscoped query. A test introspects `information_schema` to assert the guard
+list equals the set of tables that actually have an `organisationId` column.
+
+**3. A customer downgrades mid-cycle. Which records change?**
+Immediately (`changePlan`, `schedule_change_at: "cycle_end"`):
+`Subscription.pendingTier = PRO`, `cancelAtPeriodEnd = false`; one `AuditLog`
+(`plan.change_scheduled`). The tier, limits and features are untouched — they
+paid for the cycle. Razorpay sends `subscription.updated`
+(`has_scheduled_changes: true`, old `plan_id`): a `WebhookEvent` row is
+written, `gatewayEventAt` advances, nothing else changes. At cycle end Razorpay
+sends `subscription.charged` with the new `plan_id`: another `WebhookEvent`;
+`Subscription.tier = PRO`, `gatewayPlanId`, `currentPeriodStart/End`,
+`pendingTier = null`, `gatewayEventAt`; one `AuditLog` (`plan.changed`,
+TEAM→PRO); one receipt email to owners. Usage limits change implicitly
+because they're read from `config/plans.ts` by tier; `UsageRecord` rows are
+not rewritten — the next `consume()` simply compares against the lower cap.
+
+## Deploy (Vercel + Neon)
+
+1. Create a free Postgres on neon.tech; copy the pooled connection string.
+2. Import the GitHub repo in Vercel. Build uses `npm run vercel-build`
+   (`prisma generate && prisma migrate deploy && next build`).
+3. Set env vars in Vercel: `DATABASE_URL`, `AUTH_SECRET`, `INVITE_SECRET`,
+   `NEXT_PUBLIC_APP_URL` (your vercel.app URL), `AUTH_GITHUB_ID/SECRET`
+   (callback `https://<app>.vercel.app/api/auth/callback/github`),
+   `RESEND_API_KEY`, `EMAIL_FROM`, `RAZORPAY_KEY_ID/KEY_SECRET/WEBHOOK_SECRET`,
+   `RAZORPAY_PLAN_PRO/TEAM`. Do **not** set `DEV_LOGIN`.
+4. In Razorpay (test mode) → Webhooks: URL
+   `https://<app>.vercel.app/api/webhooks/razorpay`, secret =
+   `RAZORPAY_WEBHOOK_SECRET`, events: all `subscription.*` + `payment.failed`.
 
 ## Tenant isolation (how Org A can never read Org B)
 
