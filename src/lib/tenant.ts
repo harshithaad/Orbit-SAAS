@@ -134,6 +134,9 @@ export function tenantScope(organisationId: string) {
 
   return Prisma.defineExtension({
     name: `tenant:${organisationId}`,
+    // Exposed so callers can reference the bound org (e.g. in nested writes)
+    // without threading the id through every function signature.
+    client: { $orgId: () => organisationId },
     query: {
       $allModels: {
         $allOperations({ model, operation, args, query }) {

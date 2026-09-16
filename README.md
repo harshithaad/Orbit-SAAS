@@ -11,7 +11,7 @@ Stripe · Resend · Vercel
 
 - [x] Phase 1 — Tenancy model, Prisma schema, tenant-isolation guard + tests
 - [x] Phase 2 — Auth (GitHub / magic link / dev login) + organisation creation
-- [ ] Phase 3 — Invites + RBAC
+- [x] Phase 3 — Signed invite links + RBAC (single `can()` check)
 - [ ] Phase 4 — Plans + feature flags
 - [ ] Phase 5 — Stripe billing + idempotent webhooks
 - [ ] Phase 6 — Usage metering
@@ -40,6 +40,24 @@ when `NODE_ENV !== "production"` and `DEV_LOGIN=true`.
 touching tenant data: it verifies the session, looks up the org, requires a
 `Membership` row for (user, org), and returns `tenantDb(org.id)`. That
 membership lookup is the only place an `organisationId` is ever derived from.
+
+## RBAC
+
+`src/lib/permissions.ts` is the only place roles are compared. One table maps
+each action to a minimum role (OWNER ⊃ ADMIN ⊃ MEMBER); `can(role, action)` /
+`assertCan(ctx, action)` are called by every server action and UI gate.
+Role-change and removal rules (no self-change, last owner protected, admins
+can't touch owners) live in `canChangeRole` / `canRemoveMember` and are
+re-evaluated inside a transaction so they can't be raced.
+
+## Invitations
+
+`src/lib/invites.ts` — links are `/invite/<payload>.<hmac>` where the payload
+(invitation id, org id, email, expiry) is HMAC-SHA256 signed with
+`INVITE_SECRET`. Verification is timing-safe; the DB stores only a hash of the
+token; acceptance flips PENDING→ACCEPTED atomically and requires the
+signed-in email to match. Links expire after 7 days and one live link exists
+per (org, email).
 
 ## Tenant isolation (how Org A can never read Org B)
 

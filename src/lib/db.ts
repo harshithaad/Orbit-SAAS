@@ -34,6 +34,8 @@ export function createClient(url?: string) {
 export type Clients = ReturnType<typeof createClient>;
 export type Db = Clients["db"];
 export type TenantDb = ReturnType<Clients["tenantDb"]>;
+/** The client handed to an interactive `$transaction` callback. */
+export type TenantTx = Omit<TenantDb, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
 
 const g = globalThis as unknown as { __orbitClients?: Clients };
 const clients: Clients = g.__orbitClients ?? createClient();
