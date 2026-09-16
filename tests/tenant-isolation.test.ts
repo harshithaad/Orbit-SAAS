@@ -96,7 +96,6 @@ describe("tenantDb(organisationId)", () => {
   });
 
   it("stamps creates with the bound organisationId", async () => {
-    const root = testDb();
     const a = await createOrg("a");
     const b = await createOrg("b");
     const dbA = tenantDb(a.id);

@@ -10,7 +10,7 @@ Stripe · Resend · Vercel
 ## Status
 
 - [x] Phase 1 — Tenancy model, Prisma schema, tenant-isolation guard + tests
-- [ ] Phase 2 — Auth + organisation creation
+- [x] Phase 2 — Auth (GitHub / magic link / dev login) + organisation creation
 - [ ] Phase 3 — Invites + RBAC
 - [ ] Phase 4 — Plans + feature flags
 - [ ] Phase 5 — Stripe billing + idempotent webhooks
@@ -29,6 +29,17 @@ npm run test:setup          # creates orbit_test DB + migrates it
 npm test
 npm run dev
 ```
+
+## Auth & org resolution
+
+`src/auth.ts` — Auth.js v5 with GitHub OAuth, Resend magic links (when
+`RESEND_API_KEY` is set) and a **dev login** provider that is only registered
+when `NODE_ENV !== "production"` and `DEV_LOGIN=true`.
+
+`src/lib/org.ts` — `requireOrg(slug)` is the single entry point for anything
+touching tenant data: it verifies the session, looks up the org, requires a
+`Membership` row for (user, org), and returns `tenantDb(org.id)`. That
+membership lookup is the only place an `organisationId` is ever derived from.
 
 ## Tenant isolation (how Org A can never read Org B)
 
