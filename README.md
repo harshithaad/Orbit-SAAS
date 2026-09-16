@@ -5,7 +5,7 @@ A production-shaped B2B SaaS starter: users sign up, create an organisation
 is gated by tier and usage is metered.
 
 **Stack:** Next.js (App Router) · TypeScript · PostgreSQL + Prisma · NextAuth ·
-Stripe · Resend · Vercel
+Razorpay · Resend · Vercel
 
 ## Status
 
@@ -13,7 +13,7 @@ Stripe · Resend · Vercel
 - [x] Phase 2 — Auth (GitHub / magic link / dev login) + organisation creation
 - [x] Phase 3 — Signed invite links + RBAC (single `can()` check)
 - [x] Phase 4 — Plans (Free/Pro/Team), 7 feature flags, 3 metered limits, gated UI + 403s
-- [ ] Phase 5 — Stripe billing + idempotent webhooks
+- [x] Phase 5 — Razorpay subscriptions, signature-verified idempotent webhooks, replay harness
 - [ ] Phase 6 — Usage metering
 - [ ] Phase 7 — Audit log + transactional email
 - [ ] Phase 8 — Integration tests, deploy
@@ -69,6 +69,39 @@ answers every feature/limit question from that config plus the org's
 (`effectiveTier`). `<FeatureGate>` renders upgrade prompts in the UI; the real
 gate is `requireFeature()` in server code. Pages use `requireCan()` which
 renders a 403 via Next's `forbidden()`.
+
+## Billing (Razorpay, test mode)
+
+`src/lib/billing.ts` is the state machine; `src/lib/razorpay.ts` the SDK and
+signature checks.
+
+- **Checkout never provisions.** `startCheckout` creates a Razorpay
+  subscription with `notes.organisationId` and marks the row `INCOMPLETE`. The
+  tier changes only when gateway state is applied through `applyGatewayState`
+  (webhook, or `syncFromGateway` as a fallback/"refresh").
+- **Webhook signature** — `X-Razorpay-Signature` is HMAC-SHA256 over the raw
+  body, compared with `timingSafeEqual`. Bad signature → 401, nothing recorded.
+- **Idempotency** — `x-razorpay-event-id` is inserted into `WebhookEvent`
+  (unique) in the *same transaction* as the state change. A retry violates the
+  constraint before any work runs and is acknowledged with 200. If processing
+  throws, the insert rolls back too, so the gateway's retry gets a clean run.
+- **Ordering** — every applied event stamps `gatewayEventAt`; older events are
+  recorded but not applied.
+- **Concurrency** — `applyGatewayState` takes `SELECT … FOR UPDATE` on the
+  org's subscription so concurrent *distinct* events are serialised.
+- **Downgrades** are scheduled at cycle end (`pendingTier`); upgrades apply now.
+  Cancel = downgrade to Free at cycle end. A CANCELED/UNPAID subscription
+  degrades to Free access without touching data.
+
+### Replay harness (the resume number)
+
+```bash
+npm run replay -- --org <organisationId> --events 150 --retries 3
+```
+
+Generates 150 distinct signed events, delivers each 3× in shuffled order with
+concurrency 10, then checks the DB. Last run: **450 deliveries → 300 duplicates
+rejected, 150 event rows, exactly 1 plan change, 0 double-provisioning.**
 
 ## Tenant isolation (how Org A can never read Org B)
 
