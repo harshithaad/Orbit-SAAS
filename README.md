@@ -12,7 +12,7 @@ Stripe · Resend · Vercel
 - [x] Phase 1 — Tenancy model, Prisma schema, tenant-isolation guard + tests
 - [x] Phase 2 — Auth (GitHub / magic link / dev login) + organisation creation
 - [x] Phase 3 — Signed invite links + RBAC (single `can()` check)
-- [ ] Phase 4 — Plans + feature flags
+- [x] Phase 4 — Plans (Free/Pro/Team), 7 feature flags, 3 metered limits, gated UI + 403s
 - [ ] Phase 5 — Stripe billing + idempotent webhooks
 - [ ] Phase 6 — Usage metering
 - [ ] Phase 7 — Audit log + transactional email
@@ -58,6 +58,17 @@ re-evaluated inside a transaction so they can't be raced.
 token; acceptance flips PENDING→ACCEPTED atomically and requires the
 signed-in email to match. Links expire after 7 days and one live link exists
 per (org, email).
+
+## Plans & feature flags
+
+`src/config/plans.ts` is the only definition of what each tier unlocks: a
+price, three metered limits (`members`, `projects`, `api_calls` — each with a
+soft warn level and a hard cap) and seven boolean features. `src/lib/plans.ts`
+answers every feature/limit question from that config plus the org's
+`Subscription` row; a CANCELED/UNPAID subscription degrades to Free
+(`effectiveTier`). `<FeatureGate>` renders upgrade prompts in the UI; the real
+gate is `requireFeature()` in server code. Pages use `requireCan()` which
+renders a 403 via Next's `forbidden()`.
 
 ## Tenant isolation (how Org A can never read Org B)
 
