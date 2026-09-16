@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Orbit — Multi-Tenant SaaS with Subscriptions
 
-## Getting Started
+A production-shaped B2B SaaS starter: users sign up, create an organisation
+(tenant), invite teammates with roles, and subscribe to a plan. Feature access
+is gated by tier and usage is metered.
 
-First, run the development server:
+**Stack:** Next.js (App Router) · TypeScript · PostgreSQL + Prisma · NextAuth ·
+Stripe · Resend · Vercel
+
+## Status
+
+- [x] Phase 1 — Tenancy model, Prisma schema, tenant-isolation guard + tests
+- [ ] Phase 2 — Auth + organisation creation
+- [ ] Phase 3 — Invites + RBAC
+- [ ] Phase 4 — Plans + feature flags
+- [ ] Phase 5 — Stripe billing + idempotent webhooks
+- [ ] Phase 6 — Usage metering
+- [ ] Phase 7 — Audit log + transactional email
+- [ ] Phase 8 — Integration tests, deploy
+
+## Local setup
 
 ```bash
+cp .env.example .env        # fill in secrets as phases require them
+npm install
+npm run db:up               # Postgres 16 in Docker (port 5433)
+npm run db:migrate
+npm run test:setup          # creates orbit_test DB + migrates it
+npm test
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tenant isolation (how Org A can never read Org B)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Every table holding tenant data has an `organisationId` column
+(`src/lib/tenant.ts` → `TENANT_MODELS`). Two layers enforce the rule:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Guard** — a Prisma client extension on the root client throws
+   `TenantScopeError` for any query on a tenant model whose `where`/`data`
+   does not pin an `organisationId`. An unscoped query cannot reach Postgres.
+2. **Scoped client** — `tenantDb(organisationId)` injects the org id into
+   every tenant-model query, overriding anything the caller passed. Application
+   code uses this exclusively; the org id comes from the caller's verified
+   membership, never from request input.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+A test introspects `information_schema` to assert the guard's model list
+matches every table that actually has an `organisationId` column, so a new
+tenant table can't slip past it.
