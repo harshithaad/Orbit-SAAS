@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db, tenantDb } from "@/lib/db";
 import type { Role } from "@/generated/prisma/enums";
+import { AuthError, ForbiddenError } from "@/lib/errors";
 
 /**
  * Request-scoped identity and tenant resolution.
@@ -18,18 +19,7 @@ import type { Role } from "@/generated/prisma/enums";
  * Nothing downstream accepts an organisationId from request input.
  */
 
-export class AuthError extends Error {
-  constructor(message = "Not authenticated") {
-    super(message);
-    this.name = "AuthError";
-  }
-}
-export class ForbiddenError extends Error {
-  constructor(message = "Forbidden") {
-    super(message);
-    this.name = "ForbiddenError";
-  }
-}
+export { AuthError, ForbiddenError };
 
 export const getUser = cache(async () => {
   const session = await auth();
