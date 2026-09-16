@@ -10,6 +10,7 @@ export default async function OrgLayout({ children, params }: LayoutProps<"/app/
 
   const nav = [
     { href: `/app/${orgSlug}`, label: "Overview" },
+    { href: `/app/${orgSlug}/projects`, label: "Projects" },
     { href: `/app/${orgSlug}/members`, label: "Members" },
     { href: `/app/${orgSlug}/billing`, label: "Billing" },
     { href: `/app/${orgSlug}/audit`, label: "Audit log" },

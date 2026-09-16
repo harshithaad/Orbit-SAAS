@@ -1,4 +1,5 @@
 import type { Role } from "@/generated/prisma/enums";
+import { forbidden } from "next/navigation";
 import { ForbiddenError } from "@/lib/errors";
 import type { OrgContext } from "@/lib/org";
 
@@ -51,10 +52,16 @@ export function can(role: Role, action: Action): boolean {
   return RANK[role] >= RANK[MIN_ROLE[action]];
 }
 
+/** For server actions / route handlers: throws a typed error. */
 export function assertCan(ctx: Pick<OrgContext, "role">, action: Action): void {
   if (!can(ctx.role, action)) {
     throw new ForbiddenError(`Role ${ctx.role} cannot ${action}`);
   }
+}
+
+/** For pages: renders the segment's forbidden.tsx (HTTP 403). */
+export function requireCan(ctx: Pick<OrgContext, "role">, action: Action): void {
+  if (!can(ctx.role, action)) forbidden();
 }
 
 /**
