@@ -1,0 +1,244 @@
+// Orbit — multi-tenant SaaS schema.
+//
+// Tenancy rule: every table that holds tenant data carries `organisationId`.
+// The Prisma client in src/lib/db.ts refuses to query those tables without it.
+// Tenant-scoped tables are marked with `// @tenant` below.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Auth (NextAuth / Auth.js) — global, not tenant-scoped
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+  memberships Membership[]
+  invitesSent Invitation[] @relation("InvitedBy")
+  auditLogs   AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Organisation {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships   Membership[]
+  invitations   Invitation[]
+  subscription  Subscription?
+  usageRecords  UsageRecord[]
+  auditLogs     AuditLog[]
+  projects      Project[]
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+// @tenant
+model Membership {
+  id             String   @id @default(cuid())
+  organisationId String
+  userId         String
+  role           Role     @default(MEMBER)
+  createdAt      DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, userId])
+  @@index([userId])
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+// @tenant
+model Invitation {
+  id             String           @id @default(cuid())
+  organisationId String
+  email          String
+  role           Role             @default(MEMBER)
+  // Random secret; the emailed link carries an HMAC over (id, email, expiresAt).
+  tokenHash      String           @unique
+  status         InvitationStatus @default(PENDING)
+  invitedById    String
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([organisationId, email])
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+enum PlanTier {
+  FREE
+  PRO
+  TEAM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  UNPAID
+}
+
+// @tenant — one per organisation. Free orgs still get a row (tier FREE, no Stripe ids).
+model Subscription {
+  id                   String             @id @default(cuid())
+  organisationId       String             @unique
+  tier                 PlanTier           @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+}
+
+// Every Stripe event we have ever seen. `stripeEventId` is unique, so a retried
+// delivery hits the constraint and is treated as already-processed.
+model WebhookEvent {
+  id            String    @id @default(cuid())
+  stripeEventId String    @unique
+  type          String
+  payload       Json
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+  error         String?
+
+  @@index([type])
+}
+
+// ---------------------------------------------------------------------------
+// Usage metering
+// ---------------------------------------------------------------------------
+
+// @tenant — one row per (org, metric, period). Incremented atomically.
+model UsageRecord {
+  id             String   @id @default(cuid())
+  organisationId String
+  metric         String   // e.g. "projects", "api_calls"
+  periodStart    DateTime // first day of the billing month (UTC)
+  count          Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, metric, periodStart])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+// @tenant
+model AuditLog {
+  id             String   @id @default(cuid())
+  organisationId String
+  actorId        String?  // null for system/webhook-driven actions
+  action         String   // e.g. "member.invited", "member.role_changed", "plan.changed"
+  targetType     String?
+  targetId       String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organisationId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Product data — the thing tenants actually create. Metered.
+// ---------------------------------------------------------------------------
+
+// @tenant
+model Project {
+  id             String   @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId])
+}
