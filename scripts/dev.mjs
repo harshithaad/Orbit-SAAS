@@ -1,5 +1,5 @@
 // Launch helper: runs `next dev` with this project as cwd, regardless of
-// where the caller started from. Used by the Claude desktop preview.
+// where the caller started from.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
