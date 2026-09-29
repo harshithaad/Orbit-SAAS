@@ -1,214 +1,266 @@
-# Orbit — Multi-Tenant SaaS with Subscriptions
+# Orbit
 
-A production-shaped B2B SaaS starter: users sign up, create an organisation
-(tenant), invite teammates with roles, and subscribe to a plan. Feature access
-is gated by tier and usage is metered.
+Multi-tenant B2B SaaS platform with organisations, role-based access,
+subscription billing and usage metering.
 
-**Stack:** Next.js (App Router) · TypeScript · PostgreSQL + Prisma · NextAuth ·
-Razorpay · Resend · Vercel
+Users sign up, create an organisation, invite teammates, and subscribe to a
+plan. Each plan unlocks a set of features and usage limits, and billing is
+driven by Razorpay subscriptions.
 
-## Status
+**Built with** Next.js (App Router) · TypeScript · PostgreSQL · Prisma ·
+Auth.js · Razorpay · Resend · Tailwind CSS
 
-- [x] Phase 1 — Tenancy model, Prisma schema, tenant-isolation guard + tests
-- [x] Phase 2 — Auth (GitHub / magic link / dev login) + organisation creation
-- [x] Phase 3 — Signed invite links + RBAC (single `can()` check)
-- [x] Phase 4 — Plans (Free/Pro/Team), 7 feature flags, 3 metered limits, gated UI + 403s
-- [x] Phase 5 — Razorpay subscriptions, signature-verified idempotent webhooks, replay harness
-- [x] Phase 6 — Usage metering (soft/hard limits, monthly + lifetime metrics, usage dashboard, 429s)
-- [x] Phase 7 — Audit log + transactional email (invite, receipt, payment failed)
-- [x] Phase 8 — 83 integration tests, replay harness, Vercel deploy config
+## Features
 
-## Local setup
+- **Organisations** — every user can create or join multiple organisations;
+  all data is scoped to one of them and isolated at the data-access layer.
+- **Authentication** — GitHub OAuth and email magic links.
+- **Team management** — email invitations via signed, expiring links, and
+  three roles (Owner, Admin, Member) with a single permission model.
+- **Subscription billing** — Free, Pro and Team plans on Razorpay, with
+  immediate upgrades, end-of-cycle downgrades and cancellation.
+- **Feature gating** — plan-based features enforced on the server, with
+  upgrade prompts in the UI.
+- **Usage metering** — per-organisation limits on members, projects and API
+  calls, with warning thresholds, hard caps and a usage dashboard.
+- **Audit log** — a record of every sensitive action in the organisation.
+- **Transactional email** — invitations, payment receipts and payment-failure
+  notices.
+
+## Plans
+
+|                     | Free | Pro     | Team      |
+| ------------------- | ---- | ------- | --------- |
+| Price (per month)   | ₹0   | ₹749    | ₹2,499    |
+| Members             | 3    | 10      | Unlimited |
+| Projects            | 3    | 25      | Unlimited |
+| API calls / month   | 100  | 2,000   | 20,000    |
+| Audit log           | —    | ✓       | ✓         |
+| Audit log export    | —    | —       | ✓         |
+| API access          | —    | ✓       | ✓         |
+| Advanced analytics  | —    | ✓       | ✓         |
+| Custom roles        | —    | —       | ✓         |
+| Single sign-on      | —    | —       | ✓         |
+| Priority support    | —    | —       | ✓         |
+
+Plans are defined in one place, [`src/config/plans.ts`](src/config/plans.ts).
+Changing a price, limit or feature there updates gating, metering and the
+billing page together.
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 20+
+- Docker (for the local PostgreSQL database)
+
+### Setup
 
 ```bash
-cp .env.example .env        # fill in secrets as phases require them
+cp .env.example .env
 npm install
-npm run db:up               # Postgres 16 in Docker (port 5433)
+npm run db:up        # starts PostgreSQL 16 in Docker on port 5433
 npm run db:migrate
-npm run test:setup          # creates orbit_test DB + migrates it
-npm test
 npm run dev
 ```
 
-## Auth & org resolution
+Open http://localhost:3000. With `DEV_LOGIN=true` in `.env` you can sign in
+locally without configuring an OAuth provider. The dev login is never enabled
+in production builds.
 
-`src/auth.ts` — Auth.js v5 with GitHub OAuth, Resend magic links (when
-`RESEND_API_KEY` is set) and a **dev login** provider that is only registered
-when `NODE_ENV !== "production"` and `DEV_LOGIN=true`.
+### Environment variables
 
-`src/lib/org.ts` — `requireOrg(slug)` is the single entry point for anything
-touching tenant data: it verifies the session, looks up the org, requires a
-`Membership` row for (user, org), and returns `tenantDb(org.id)`. That
-membership lookup is the only place an `organisationId` is ever derived from.
+| Variable                    | Description                                            |
+| --------------------------- | ------------------------------------------------------ |
+| `DATABASE_URL`              | PostgreSQL connection string                           |
+| `TEST_DATABASE_URL`         | Separate database used by the test suite               |
+| `NEXT_PUBLIC_APP_URL`       | Public base URL of the app                             |
+| `AUTH_SECRET`               | Session secret (`openssl rand -base64 32`)             |
+| `INVITE_SECRET`             | HMAC key for invitation links                          |
+| `DEV_LOGIN`                 | Enables passwordless sign-in in development only       |
+| `AUTH_GITHUB_ID` / `_SECRET`| GitHub OAuth app credentials                           |
+| `RESEND_API_KEY`            | Resend API key; enables magic links and outgoing email |
+| `EMAIL_FROM`                | Sender address for outgoing email                      |
+| `RAZORPAY_KEY_ID` / `_SECRET` | Razorpay API keys                                    |
+| `RAZORPAY_WEBHOOK_SECRET`   | Secret used to verify Razorpay webhooks                |
+| `RAZORPAY_PLAN_PRO` / `_TEAM` | Razorpay plan IDs for the paid tiers                 |
 
-## RBAC
+Without `RESEND_API_KEY`, emails are printed to the server console instead of
+being sent.
 
-`src/lib/permissions.ts` is the only place roles are compared. One table maps
-each action to a minimum role (OWNER ⊃ ADMIN ⊃ MEMBER); `can(role, action)` /
-`assertCan(ctx, action)` are called by every server action and UI gate.
-Role-change and removal rules (no self-change, last owner protected, admins
-can't touch owners) live in `canChangeRole` / `canRemoveMember` and are
-re-evaluated inside a transaction so they can't be raced.
+### Scripts
 
-## Invitations
+| Command              | Description                                          |
+| -------------------- | ---------------------------------------------------- |
+| `npm run dev`        | Start the development server                         |
+| `npm run build`      | Production build                                     |
+| `npm test`           | Run the integration test suite                       |
+| `npm run test:setup` | Create and migrate the test database                 |
+| `npm run typecheck`  | Type-check the project                               |
+| `npm run lint`       | Lint the project                                     |
+| `npm run db:up`      | Start the local database                             |
+| `npm run db:migrate` | Apply Prisma migrations                              |
+| `npm run db:studio`  | Open Prisma Studio                                   |
+| `npm run replay`     | Run the webhook replay load test (see [Testing](#testing)) |
 
-`src/lib/invites.ts` — links are `/invite/<payload>.<hmac>` where the payload
-(invitation id, org id, email, expiry) is HMAC-SHA256 signed with
-`INVITE_SECRET`. Verification is timing-safe; the DB stores only a hash of the
-token; acceptance flips PENDING→ACCEPTED atomically and requires the
-signed-in email to match. Links expire after 7 days and one live link exists
-per (org, email).
+## Project structure
 
-## Plans & feature flags
-
-`src/config/plans.ts` is the only definition of what each tier unlocks: a
-price, three metered limits (`members`, `projects`, `api_calls` — each with a
-soft warn level and a hard cap) and seven boolean features. `src/lib/plans.ts`
-answers every feature/limit question from that config plus the org's
-`Subscription` row; a CANCELED/UNPAID subscription degrades to Free
-(`effectiveTier`). `<FeatureGate>` renders upgrade prompts in the UI; the real
-gate is `requireFeature()` in server code. Pages use `requireCan()` which
-renders a 403 via Next's `forbidden()`.
-
-## Billing (Razorpay, test mode)
-
-`src/lib/billing.ts` is the state machine; `src/lib/razorpay.ts` the SDK and
-signature checks.
-
-- **Checkout never provisions.** `startCheckout` creates a Razorpay
-  subscription with `notes.organisationId` and marks the row `INCOMPLETE`. The
-  tier changes only when gateway state is applied through `applyGatewayState`
-  (webhook, or `syncFromGateway` as a fallback/"refresh").
-- **Webhook signature** — `X-Razorpay-Signature` is HMAC-SHA256 over the raw
-  body, compared with `timingSafeEqual`. Bad signature → 401, nothing recorded.
-- **Idempotency** — `x-razorpay-event-id` is inserted into `WebhookEvent`
-  (unique) in the *same transaction* as the state change. A retry violates the
-  constraint before any work runs and is acknowledged with 200. If processing
-  throws, the insert rolls back too, so the gateway's retry gets a clean run.
-- **Ordering** — every applied event stamps `gatewayEventAt`; older events are
-  recorded but not applied.
-- **Concurrency** — `applyGatewayState` takes `SELECT … FOR UPDATE` on the
-  org's subscription so concurrent *distinct* events are serialised.
-- **Downgrades** are scheduled at cycle end (`pendingTier`); upgrades apply now.
-  Cancel = downgrade to Free at cycle end. A CANCELED/UNPAID subscription
-  degrades to Free access without touching data.
-
-### Replay harness (the resume number)
-
-```bash
-npm run replay -- --org <organisationId> --events 150 --retries 3
+```
+prisma/              Database schema and migrations
+scripts/             Test DB setup, webhook replay and sandbox helpers
+src/
+  app/               Next.js routes
+    app/[orgSlug]/   Organisation workspace: projects, members, billing, usage, audit
+    api/             Auth, Razorpay webhooks, metered public API (/api/v1)
+  components/        UI components
+  config/plans.ts    Plan, feature and limit definitions
+  lib/               Core domain logic (tenancy, permissions, billing, usage, email)
+tests/               Integration tests
 ```
 
-Generates N distinct signed events, delivers each 3× in shuffled order with
-concurrency 10, then checks the DB.
+## Architecture
 
-Last run (500 × 3): **1,500 deliveries → 1,000 duplicates rejected, 500 event
-rows, exactly 1 plan change, 0 double-provisioning.** The shuffled order also
-exercises the out-of-order rule: 491 late-arriving older events were recorded
-but not applied.
+### Tenant isolation
 
-An earlier run at 150 × 3 caught a real race — two *different* events for the
-same org processed concurrently both read `tier = FREE` and both wrote a
-`plan.changed` entry. Fixed with `SELECT … FOR UPDATE` on the org's
-subscription row inside the transaction.
+Every table that holds organisation data has an `organisationId` column, and
+two layers make sure one organisation can never read another's data
+([`src/lib/tenant.ts`](src/lib/tenant.ts)):
 
-## Usage metering
+1. **Scoped client.** `tenantDb(organisationId)` is a Prisma extension that
+   adds the organisation ID to every query on tenant tables, overriding
+   whatever the caller passed. Application code only accesses tenant data
+   through it.
+2. **Guard.** The root Prisma client rejects any query on a tenant table that
+   isn't scoped to an organisation, so code that bypasses `tenantDb` fails
+   instead of leaking data.
 
-`src/lib/usage.ts`. One `UsageRecord` per (org, metric, period). `consume()`
-runs inside the transaction that performs the metered action: it locks the
-counter row (`FOR UPDATE`), compares against the plan's hard limit, and either
-increments or throws `UsageLimitError` — so the action rolls back with it and
-concurrent requests can't both slip under the cap. Soft limits only produce
-warnings. Monthly metrics (`api_calls`) reset on the 1st (UTC); row-backed
-metrics (`members`, `projects`) reconcile from the live count so deletions
-free quota. `POST /api/v1/ping` is a metered example endpoint that returns
-`429` with `x-ratelimit-*` headers at the cap.
+The organisation ID always comes from `requireOrg(slug)`
+([`src/lib/org.ts`](src/lib/org.ts)), which checks the session and the user's
+membership in that organisation. It is never taken from request input. A test
+compares the guard's table list against the live database schema, so a new
+tenant table can't be added without protection.
 
-## Audit log & email
+### Roles and permissions
 
-Every sensitive action writes an `AuditLog` row inside the same transaction
-as the action (`src/lib/audit.ts`): org created, invite sent/revoked, member
-joined/removed, role changed, checkout started, plan change scheduled/applied,
-cancellation, payment failure, project deleted. Viewing it is a Pro feature.
+[`src/lib/permissions.ts`](src/lib/permissions.ts) maps each action to a
+minimum role (Owner > Admin > Member). Every server action and UI check goes
+through `can(role, action)`. Membership rules — you can't change your own
+role, the last owner can't be removed, admins can't modify owners — are
+re-checked inside a transaction to prevent races.
 
-`src/lib/email.ts` sends via Resend when `RESEND_API_KEY` is set and logs to
-the console otherwise; tests swap in a capturing transport. Emails are sent
-*after* the owning transaction commits, never inside it, and each carries a
-provider idempotency key (`invite/<id>`, `receipt/<paymentId>`,
-`payment-failed/<eventId>`). Templates: invitation, receipt (on
-`subscription.charged`), payment failed / subscription halted (to owners).
+### Invitations
 
-## The three questions
+Invitation links carry an HMAC-SHA256-signed payload (invitation, organisation,
+email, expiry) and are verified in constant time
+([`src/lib/invites.ts`](src/lib/invites.ts)). Only a hash of the token is
+stored. Links expire after 7 days, only one active link exists per email per
+organisation, and accepting requires signing in with the invited address.
 
-**1. A payment webhook is delivered three times. What happens?**
-Each delivery hits `POST /api/webhooks/razorpay`, which reads the raw body and
-verifies `X-Razorpay-Signature` (HMAC-SHA256, timing-safe). All three pass.
-`processWebhook` then opens one transaction on the org-scoped client and
-inserts `WebhookEvent(eventId = x-razorpay-event-id)` — a unique column. The
-first delivery inserts, applies the state (`applyGatewayState`, under a row
-lock on `Subscription`), writes one `AuditLog` row, marks the event processed,
-commits, and *then* sends the receipt email. Deliveries two and three fail the
-unique insert with P2002 before any state code runs, roll back, and are
-answered `200 {duplicate: true}` so Razorpay stops retrying. One row changes,
-one audit entry, one email (which also carries `receipt/<paymentId>` as a
-provider idempotency key). The customer is charged once because Razorpay
-charges once — our job is to *provision* once, and that's what the unique key
-guarantees. Proven by `tests/webhooks.test.ts` and the replay harness above.
+### Plans and feature gating
 
-**2. How can Org A never read Org B's rows? Show the code path.**
-`requireOrg(slug)` (`src/lib/org.ts`) → session user → `Membership` lookup
-for (user, org) → `tenantDb(org.id)`. That membership lookup is the only place
-an `organisationId` is ever derived; request input never supplies one.
-`tenantDb` is a Prisma extension (`src/lib/tenant.ts`, `tenantScope`) that
-rewrites every query on the six tenant models to include
-`organisationId = <bound org>`, overriding anything the caller passed, and
-then re-checks itself with `assertScoped`. The root client has a second
-extension (`tenantGuard`) that throws `TenantScopeError` on any tenant-model
-query without an org scope, so even code that bypasses `tenantDb` cannot run
-an unscoped query. A test introspects `information_schema` to assert the guard
-list equals the set of tables that actually have an `organisationId` column.
+[`src/lib/plans.ts`](src/lib/plans.ts) answers every "can this organisation do
+X?" question from the plan config and the organisation's subscription. A
+cancelled or unpaid subscription falls back to Free access without deleting
+any data. The UI shows upgrade prompts, but enforcement happens server-side
+through `requireFeature()` and `requireCan()`, which return a 403.
 
-**3. A customer downgrades mid-cycle. Which records change?**
-Immediately (`changePlan`, `schedule_change_at: "cycle_end"`):
-`Subscription.pendingTier = PRO`, `cancelAtPeriodEnd = false`; one `AuditLog`
-(`plan.change_scheduled`). The tier, limits and features are untouched — they
-paid for the cycle. Razorpay sends `subscription.updated`
-(`has_scheduled_changes: true`, old `plan_id`): a `WebhookEvent` row is
-written, `gatewayEventAt` advances, nothing else changes. At cycle end Razorpay
-sends `subscription.charged` with the new `plan_id`: another `WebhookEvent`;
-`Subscription.tier = PRO`, `gatewayPlanId`, `currentPeriodStart/End`,
-`pendingTier = null`, `gatewayEventAt`; one `AuditLog` (`plan.changed`,
-TEAM→PRO); one receipt email to owners. Usage limits change implicitly
-because they're read from `config/plans.ts` by tier; `UsageRecord` rows are
-not rewritten — the next `consume()` simply compares against the lower cap.
+### Billing
 
-## Deploy (Vercel + Neon)
+[`src/lib/billing.ts`](src/lib/billing.ts) manages the subscription lifecycle;
+[`src/lib/razorpay.ts`](src/lib/razorpay.ts) wraps the Razorpay SDK.
 
-1. Create a free Postgres on neon.tech; copy the pooled connection string.
-2. Import the GitHub repo in Vercel. Build uses `npm run vercel-build`
-   (`prisma generate && prisma migrate deploy && next build`).
-3. Set env vars in Vercel: `DATABASE_URL`, `AUTH_SECRET`, `INVITE_SECRET`,
-   `NEXT_PUBLIC_APP_URL` (your vercel.app URL), `AUTH_GITHUB_ID/SECRET`
-   (callback `https://<app>.vercel.app/api/auth/callback/github`),
-   `RESEND_API_KEY`, `EMAIL_FROM`, `RAZORPAY_KEY_ID/KEY_SECRET/WEBHOOK_SECRET`,
-   `RAZORPAY_PLAN_PRO/TEAM`. Do **not** set `DEV_LOGIN`.
-4. In Razorpay (test mode) → Webhooks: URL
-   `https://<app>.vercel.app/api/webhooks/razorpay`, secret =
-   `RAZORPAY_WEBHOOK_SECRET`, events: all `subscription.*` + `payment.failed`.
+- **Provisioning happens on confirmation only.** Starting a checkout creates
+  a Razorpay subscription and marks it incomplete. The plan changes only when
+  Razorpay confirms it through a webhook (or a manual sync from the gateway).
+- **Webhook verification.** `POST /api/webhooks/razorpay` checks the
+  `X-Razorpay-Signature` HMAC over the raw body. Invalid requests get a 401
+  and are not recorded.
+- **Exactly-once processing.** Each event ID is inserted into a unique
+  `WebhookEvent` table in the same transaction as the state change. Repeat
+  deliveries hit the unique constraint before any work runs and are
+  acknowledged with a 200. If processing fails, the whole transaction rolls
+  back so Razorpay's retry starts clean.
+- **Ordering.** Events older than the last applied event are recorded but not
+  applied.
+- **Concurrency.** Different events for the same organisation are serialised
+  with a row lock (`SELECT … FOR UPDATE`) on its subscription.
+- **Plan changes.** Upgrades apply immediately. Downgrades and cancellations
+  are scheduled for the end of the billing cycle, so customers keep what they
+  paid for until then.
 
-## Tenant isolation (how Org A can never read Org B)
+### Usage metering
 
-Every table holding tenant data has an `organisationId` column
-(`src/lib/tenant.ts` → `TENANT_MODELS`). Two layers enforce the rule:
+[`src/lib/usage.ts`](src/lib/usage.ts) keeps one counter per organisation,
+metric and period. `consume()` runs inside the same transaction as the
+metered action: it locks the counter, checks the plan's hard limit, and either
+increments or throws — rolling the action back with it. Concurrent requests
+can't both slip under the cap. API call counts reset monthly (UTC); member and
+project counts are reconciled from live data, so deleting a project frees
+quota.
 
-1. **Guard** — a Prisma client extension on the root client throws
-   `TenantScopeError` for any query on a tenant model whose `where`/`data`
-   does not pin an `organisationId`. An unscoped query cannot reach Postgres.
-2. **Scoped client** — `tenantDb(organisationId)` injects the org id into
-   every tenant-model query, overriding anything the caller passed. Application
-   code uses this exclusively; the org id comes from the caller's verified
-   membership, never from request input.
+`POST /api/v1/ping` is an example metered endpoint. At the limit it returns
+`429` with `x-ratelimit-*` headers.
 
-A test introspects `information_schema` to assert the guard's model list
-matches every table that actually has an `organisationId` column, so a new
-tenant table can't slip past it.
+### Audit log and email
+
+Sensitive actions (organisation created, invites, membership and role
+changes, plan changes, cancellations, payment failures, deletions) write an
+audit entry in the same transaction as the action
+([`src/lib/audit.ts`](src/lib/audit.ts)). The audit log is available on Pro
+and Team.
+
+Emails ([`src/lib/email.ts`](src/lib/email.ts)) are sent through Resend only
+after the related transaction commits, and each carries an idempotency key so
+a retry never sends a duplicate.
+
+## Testing
+
+The integration tests run against a real PostgreSQL database and cover tenant
+isolation, permissions, invitations, plan gating, usage limits, webhooks and
+email.
+
+```bash
+npm run test:setup   # once: creates and migrates the orbit_test database
+npm test
+```
+
+### Webhook replay
+
+`npm run replay` load-tests webhook handling by generating signed events and
+delivering each one several times, in shuffled order and concurrently, then
+checking the database:
+
+```bash
+npm run replay -- --org <organisationId> --events 500 --retries 3
+```
+
+In a run of 500 events × 3 deliveries (1,500 requests), all 1,000 duplicates
+were rejected, exactly one plan change was applied, and no subscription was
+provisioned twice. Out-of-order events were recorded without being applied.
+
+### Simulating activation in the Razorpay sandbox
+
+Razorpay's test mode can't always complete a card mandate. To activate a
+subscription locally, send a signed `subscription.activated` webhook through
+the normal code path:
+
+```bash
+npx tsx scripts/simulate-activation.mts --slug <org-slug> [--url http://localhost:3000]
+```
+
+## Deployment
+
+Orbit deploys to Vercel with a managed PostgreSQL database such as Neon.
+
+1. Create a PostgreSQL database and copy its pooled connection string.
+2. Import the repository into Vercel. The build runs `npm run vercel-build`,
+   which applies migrations before building.
+3. Set the [environment variables](#environment-variables) in Vercel, with
+   `NEXT_PUBLIC_APP_URL` set to your deployment URL. Do **not** set
+   `DEV_LOGIN`.
+4. Set the GitHub OAuth callback URL to
+   `https://<your-app>/api/auth/callback/github`.
+5. In the Razorpay dashboard, add a webhook pointing to
+   `https://<your-app>/api/webhooks/razorpay` with your
+   `RAZORPAY_WEBHOOK_SECRET`, subscribed to all `subscription.*` events and
+   `payment.failed`.
